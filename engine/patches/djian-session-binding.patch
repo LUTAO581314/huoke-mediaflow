@@ -1,0 +1,83 @@
+diff --git a/packages/host-bridge/lib/engine-client.js b/packages/host-bridge/lib/engine-client.js
+index 6b1cc98..16de2bb 100644
+--- a/packages/host-bridge/lib/engine-client.js
++++ b/packages/host-bridge/lib/engine-client.js
+@@ -89,6 +89,10 @@ export class EngineClient {
+   async projectFor(sessionId) {
+     this.projects ??= new Map();
+     if (this.projects.has(sessionId)) return this.projects.get(sessionId);
++    // 短缓存：外部（mf dj bind / 面板切项目）改了绑定，2 秒内就能看到
++    const now = Date.now();
++    if (this.cacheAt && now - this.cacheAt < 2000 && this.projects.has(sessionId)) return this.projects.get(sessionId);
++    this.cacheAt = now;
+     const r = await this.post('/api/session-project', { sessionId });
+     const project = r.project;
+     this.projects.set(sessionId, project);
+diff --git a/packages/webui/server/routes.mjs b/packages/webui/server/routes.mjs
+index 6778652..79f2726 100644
+--- a/packages/webui/server/routes.mjs
++++ b/packages/webui/server/routes.mjs
+@@ -81,7 +81,7 @@ export function buildRouter({ store, render, settings = new Settings() }) {
+   });
+   r.add('POST', '/api/session-project', async (req, res) => {
+     const body = await readJson(req);
+-    const pid = store.bindSession(body?.sessionId, body?.name);
++    const pid = body?.pid ? store.bindSessionTo(body.sessionId, body.pid) : store.bindSession(body?.sessionId, body?.name);
+     sendJson(res, 200, { ok: true, project: store.list().find((p) => p.id === pid) ?? { id: pid } });
+   });
+   r.add('GET', '/api/session-project', (req, res, { url }) => {
+diff --git a/packages/webui/server/store.mjs b/packages/webui/server/store.mjs
+index 9b239d8..43e61a5 100644
+--- a/packages/webui/server/store.mjs
++++ b/packages/webui/server/store.mjs
+@@ -122,6 +122,17 @@ export class Store {
+     }).sort((a, b) => String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')));
+   }
+ 
++  /** 没有任何片段、没有任何素材 = 空项目 */
++  isEmpty(id) {
++    try {
++      const t = readJsonFile(this.timelineFile(id)) ?? this.projects.get(id)?.timeline;
++      const clips = (t?.videoTracks ?? []).reduce((n, tr) => n + (tr.clips?.length ?? 0), 0) + (t?.audioTracks ?? []).reduce((n, tr) => n + (tr.clips?.length ?? 0), 0);
++      const overlays = t?.overlays?.length ?? 0;
++      const assets = fs.readdirSync(this.assetsDir(id)).filter((f) => !f.startsWith('.')).length;
++      return !clips && !overlays && !assets;
++    } catch { return false; }
++  }
++
+   create(name, canvas) {
+     const id = newProjectId();
+     const t = emptyTimeline(canvas && typeof canvas === 'object' ? sanitizeCanvas(canvas) : {});
+@@ -197,14 +208,31 @@ export class Store {
+     const taken = new Set(Object.values(map));
+     let legacy = null;
+     try { legacy = sanitizeId(fs.readFileSync(LEGACY_CURRENT_FILE, 'utf8').trim()); } catch {}
++    // 同名复用：同名的空项目直接接手（空项目没人在改，接手比另建安全），避免每开一个新会话就多一个空项目
++    const autoName = typeof name === 'string' && name.trim() ? name.trim().slice(0, 60) : '剪辑 ' + new Date().toISOString().slice(0, 10);
++    const reuse = this.list().find((p) => p.name === autoName && this.isEmpty(p.id));
+     const id = legacy && this.exists(legacy) && !taken.has(legacy)
+       ? legacy
+-      : this.create(name || '剪辑 ' + new Date().toISOString().slice(0, 10));
++      : reuse
++        ? reuse.id
++        : this.create(autoName || '剪辑 ' + new Date().toISOString().slice(0, 10));
+     map[sid] = id;
+     atomicWriteJson(SESSIONS_FILE, map);
+     return id;
+   }
+ 
++  /** 显式绑定：把会话指到已有项目（mf dj bind 走这里，不再自己写 sessions.json） */
++  bindSessionTo(sessionId, projectId) {
++    const sid = sanitizeId(sessionId);
++    if (!sid) throw new StoreError(400, '缺少 sessionId');
++    const pid = sanitizeId(projectId);
++    if (!pid || !this.exists(pid)) throw new StoreError(404, '项目不存在');
++    const map = this.sessions();
++    map[sid] = pid;
++    atomicWriteJson(SESSIONS_FILE, map);
++    return pid;
++  }
++
+   /** 旧版全局 timeline.json → 默认项目（只在首次启动、没有任何项目时执行一次） */
+   migrateLegacy() {
+     if (fs.readdirSync(PROJECTS_DIR).length) return;
