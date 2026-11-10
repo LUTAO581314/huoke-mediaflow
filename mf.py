@@ -4,6 +4,9 @@
 import argparse, asyncio, datetime as dt, json, os, re, subprocess, sys, tempfile, time, urllib.error, urllib.request, uuid
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from huoke_lint import format_violations, lint_text, lint_timeline  # noqa: E402
+
 LIB = Path.home() / "媒体库"
 FONTS = LIB / "素材" / "字体"
 GPU_HOST = os.environ.get("MF_GPU_HOST", "lt@l-l")
@@ -29,6 +32,7 @@ TOOLS = Path(os.environ.get("MF_TOOLS", Path.home() / "mediaflow" / "tools"))
 MULTIPLANE = TOOLS / "multiplane"
 CRV_BIN = TOOLS / "crv" / "bin" / "crv"
 MP_SHOTS = LIB / "素材" / "模板" / "multiplane"
+TPL_DIR = Path(os.environ.get("MF_SHOTS", Path(__file__).resolve().parent / "shots"))
 UPLOAD_LIMIT = 512 * 1024 * 1024
 
 _rules_cache = None
@@ -125,8 +129,12 @@ def dj_api(method, path, payload=None):
         die(f"D剪 引擎没响应（{DJIAN_API}）。先打开 D剪 面板再试。\n{e}")
 
 def dj_ready():
-    try: dj_api("GET", "/api/health"); return True
-    except SystemExit: return False
+    """静默探活：不打印、不退出，只回答"在不在"。"""
+    try:
+        with urllib.request.urlopen(DJIAN_API.rstrip("/") + "/api/health", timeout=3) as r:
+            return json.loads(r.read().decode() or "{}").get("service") == "djian-engine"
+    except Exception:
+        return False
 
 def dj_create(name, canvas):
     return dj_api("POST", "/api/projects", {"name": name, "meta": canvas})["id"]
@@ -194,6 +202,7 @@ def auto_bind(proj, pid):
 
 
 def cmd_dj(a):
+    if a.action in ("up", "down", "status"): return cmd_serve(a)
     proj = project_dir(a.project) if a.project else None
     if a.action == "new":
         st = dj_state(proj)
@@ -258,6 +267,79 @@ def cmd_dj(a):
     print(f"源片目录 {src}（{'有' if src.exists() else '缺'}）")
     if not assets: print("! 素材库是空的：先 mf dj import 或 mf new --import <目录>")
     print(f"字幕：{rules()['subtitles']['engine']} 内做，不用 mf burn")
+    vs = lint_timeline(tl, r)
+    if vs:
+        print(f"\n✗ 合规检查不通过 {len(vs)} 处（剪辑规范 §4）：")
+        print(format_violations(vs))
+        sys.exit(1)
+    print("合规检查：通过（无联系方式/报价/绝对化/禁用词）")
+
+def cmd_lint(a):
+    """文案/时间线合规检查：mf lint 文案.txt / -t "文本" / -p <工程>"""
+    r = rules(); vs = []
+    if a.project:
+        tl = (dj_api("GET", f"/api/p/{dj_pid(project_dir(a.project))}/timeline") or {}).get("timeline") or {}
+        vs = lint_timeline(tl, r)
+    else:
+        if a.text: vs += lint_text(a.text, r, "参数")
+        for f in a.files or []:
+            vs += lint_text(Path(f).expanduser().read_text(encoding="utf-8"), r, f)
+    if not vs: print("合规检查：通过"); return
+    print(f"✗ {len(vs)} 处问题："); print(format_violations(vs)); sys.exit(1)
+
+# ---------- 引擎生命周期（谁起的、怎么收） ----------
+DJ_ROOT = Path(os.environ.get("MF_DJIAN_ROOT", Path.home() / "mediaflow" / "djian"))
+DJ_ENTRY = Path(os.environ.get("MF_DJIAN_ENTRY", "")) if os.environ.get("MF_DJIAN_ENTRY") else None
+
+def dj_entry():
+    """引擎入口：优先用 DSH 里装的那份，回落到开发态仓库。"""
+    if DJ_ENTRY: return DJ_ENTRY
+    for c in (Path.home() / ".dsh" / "profiles" / "desktop" / "node_modules" / "@djian" / "webui" / "server" / "index.mjs",
+              DJ_ROOT / "packages" / "webui" / "server" / "index.mjs"):
+        if c.exists(): return c
+    die("找不到 D剪 引擎入口（D剪 面板没装好？）")
+
+def dj_pidfile():
+    f = Path.home() / ".djian" / "engine-port.json"
+    try: return json.loads(f.read_text())
+    except Exception: return {}
+
+def cmd_serve(a):
+    info = dj_pidfile()
+    if a.action == "status" or (a.action == "up" and dj_ready()):
+        ok = dj_ready()
+        print(f"D剪 引擎 {'✔ 在跑' if ok else '✗ 没起'}  {DJIAN_API}")
+        if info: print(f"  pid {info.get('pid')} · 端口 {info.get('port')} · 起于 {info.get('startedAt')} · v{info.get('version')}")
+        if a.action == "status": sys.exit(0 if ok else 1)
+        return
+    if a.action == "down":
+        pid = info.get("pid")
+        if not pid: print("没有记录 pid（~/.djian/engine-port.json）；可能本来就没起"); return
+        try:
+            ps = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout
+        except Exception: ps = ""
+        if "webui/server/index.mjs" not in ps:
+            print(f"pid {pid} 已经不是 D剪 引擎（{ps.strip()[:60]}），不动它"); return
+        os.kill(int(pid), 15)
+        for _ in range(40):
+            time.sleep(0.25)
+            if not dj_ready(): print(f"已停 pid {pid}"); return
+        die(f"pid {pid} 15 秒还没退，手动 kill -9 {pid}")
+    # up：起一个脱离终端的引擎，日志进 ~/.djian/logs/engine.log
+    entry = dj_entry()
+    logdir = Path.home() / ".djian" / "logs"; logdir.mkdir(parents=True, exist_ok=True)
+    logf = logdir / "engine.log"
+    log(f"启动引擎 {entry}")
+    with logf.open("ab") as fh:
+        subprocess.Popen(["node", str(entry)], cwd=str(DJ_ROOT if (DJ_ROOT / "package.json").exists() else entry.parent),
+                         stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
+    for _ in range(60):
+        time.sleep(0.25)
+        if dj_ready():
+            info = dj_pidfile()
+            print(f"D剪 引擎已起 pid {info.get('pid')} → {DJIAN_API}\n日志 {logf}")
+            return
+    die(f"引擎 15 秒内没响应，看日志：{logf}")
 
 def cmd_new(a):
     brand = norm_brand(a.brand)
@@ -520,9 +602,22 @@ def cmd_mix(a):
     ffmpeg(*ins, "-filter_complex", fc, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", out)
     print(out)
 
+def lint_gate(proj, force=False):
+    """导出前的硬闸门：时间线里的对外文案有违规就不许出片。"""
+    try:
+        tl = (dj_api("GET", f"/api/p/{dj_pid(proj)}/timeline") or {}).get("timeline") or {}
+    except SystemExit:
+        return  # 引擎不在（如纯转码），交给 mf dj check
+    vs = lint_timeline(tl, rules())
+    if not vs: return
+    print(f"✗ 合规检查不通过 {len(vs)} 处，不出片：\n{format_violations(vs)}", file=sys.stderr)
+    if not force: die("改掉上面的问题再导出；确认要强出加 --force")
+    print("! --force：带着违规继续导出（发布前必须修）", file=sys.stderr)
+
 def cmd_export(a):
     src = Path(a.input); proj = project_dir(a.project); a.platform = plat(a.platform)
     r = rules(); canvas = canvas_of(a.platform); W, H = canvas["width"], canvas["height"]
+    lint_gate(proj, getattr(a, "force", False))
     fps = str(a.fps or canvas["fps"])
     scale = getattr(a, "scale", 1) or 1
     W, H = int(W * scale) // 2 * 2, int(H * scale) // 2 * 2
@@ -557,10 +652,15 @@ def cmd_export(a):
     print(out)
 
 def qc(p):
-    info = probe(p); v = next(s for s in info["streams"] if s["codec_type"] == "video")
+    info = probe(p)
+    v = next((s for s in info["streams"] if s["codec_type"] == "video"), None)
+    if v is None:  # 纯音频（配音稿、音乐）也能审
+        a = next((s for s in info["streams"] if s["codec_type"] == "audio"), {})
+        v = {"width": None, "height": None, "r_frame_rate": None, "codec_name": a.get("codec_name")}
     m = subprocess.run(["ffmpeg", "-hide_banner", "-nostats", "-i", str(p), "-af", "ebur128=peak=true", "-f", "null", "-"], capture_output=True, text=True).stderr
     I = re.findall(r"I:\s+(-?[\d.]+) LUFS", m); P = re.findall(r"Peak:\s+(-?[\d.]+) dBFS", m)
-    rep = {"file": Path(p).name, "size": f"{v['width']}x{v['height']}", "fps": v.get("r_frame_rate"), "codec": v["codec_name"],
+    size = f"{v['width']}x{v['height']}" if v.get("width") else "audio-only"
+    rep = {"file": Path(p).name, "size": size, "fps": v.get("r_frame_rate"), "codec": v["codec_name"],
            "duration": round(float(info["format"]["duration"]), 2), "MB": round(int(info["format"]["size"]) / 1e6, 1),
            "LUFS": float(I[-1]) if I else None, "truePeak": float(P[-1]) if P else None}
     a_ = rules()["audio"]
@@ -641,9 +741,49 @@ def mp_render(a, shot, root, extra):
     if r.returncode: die(f"Multiplane 失败：{(r.stderr or r.stdout)[-1500:]}")
     return r
 
+def _chars(text):
+    """把 CTA 文案包成逐字 span（方便打字机）；<br>/换行分段，*星号* 裹的是强调色。"""
+    lines = re.split(r"<br\s*/?>|\n", text or "")
+    out = []
+    for ln in lines:
+        buf, accent = [], False
+        for ch in ln:
+            if ch == "*": accent = not accent; continue
+            esc = {"&": "&amp;", "<": "&lt;", ">": "&gt;"}.get(ch, ch)
+            style = ' style="color:var(--accent)"' if accent else ""
+            buf.append(f'<span class="ch"{style}>{esc}</span>')
+        out.append('<div class="line">' + "".join(buf) + "</div>")
+    return "".join(out)
+
+def tpl_html(name, sets):
+    """读模板并替换 {{KEY}}；endcard 的 CTA 自动拆成逐字动画。"""
+    src = TPL_DIR / f"{name}.html"
+    if not src.exists():
+        have = ", ".join(sorted(x.stem for x in TPL_DIR.glob("*.html"))) or "无"
+        die(f"没有模板 {name}（有：{have}）")
+    r = rules(); cta = r["cta"]["cn"]
+    ctx = {"BRAND": sets.get("BRAND", ""), "KICKER": sets.get("KICKER", ""), "TITLE": sets.get("TITLE", ""),
+           "SUB": sets.get("SUB", ""), "FOOT": sets.get("FOOT", ""),
+           "K1": sets.get("K1", ""), "V1": sets.get("V1", "0"), "U1": sets.get("U1", ""),
+           "K2": sets.get("K2", ""), "V2": sets.get("V2", "0"), "U2": sets.get("U2", ""),
+           "K3": sets.get("K3", ""), "V3": sets.get("V3", "0"), "U3": sets.get("U3", ""),
+           "NOTE": sets.get("NOTE", "样品寄到厂里，工程师看过再给方案"),
+           "CTA": cta if name != "endcard" else _chars(sets.get("CTA", cta))}
+    for k, v in sets.items(): ctx.setdefault(k, v)
+    html = src.read_text(encoding="utf-8")
+    # 未替换的占位符一律清空，避免画面上出现 {{X}}
+    return re.sub(r"\{\{([A-Z0-9_]+)\}\}", lambda m: ctx.get(m.group(1), ""), html)
+
 def cmd_shot(a):
     """Multiplane 出片头/结尾/参数卡几秒画面，再作为素材进 D剪。"""
     if not MULTIPLANE.exists(): die(f"Multiplane 没装好：{MULTIPLANE}")
+    if getattr(a, "template", None):
+        sets = dict(kv.split("=", 1) for kv in (getattr(a, "sets", None) or []) if "=" in kv)
+        gen = MP_SHOTS / "_gen"; gen.mkdir(parents=True, exist_ok=True)
+        shot = gen / f"{a.template}-{dt.datetime.now():%Y%m%d-%H%M%S}.html"
+        shot.write_text(tpl_html(a.template, sets), encoding="utf-8")
+        a.shot, a.root = str(shot), str(MP_SHOTS)
+        if not a.output: a.output = str(MP_SHOTS / "_out" / (shot.stem + ".mp4"))
     shot = Path(a.shot).expanduser()
     root = Path(a.root).expanduser() if a.root else (MP_SHOTS if shot.exists() and MP_SHOTS in shot.parents else shot.parent)
     if not shot.exists():
@@ -653,6 +793,7 @@ def cmd_shot(a):
     root = root if root.is_dir() else shot.parent
     rel = os.path.relpath(shot.resolve(), root.resolve())
     out = Path(a.output).expanduser() if a.output else shot.with_name(shot.stem + ".mp4")
+    out.parent.mkdir(parents=True, exist_ok=True)
     extra = ["render", rel, "--root", str(root), "--out", str(out), "--quality", a.quality]
     if a.motion_blur: extra.append("--motion-blur")
     if a.scale: extra += ["--scale", str(a.scale)]
@@ -690,10 +831,11 @@ def main():
     def add(name, fn, help_):
         x = sp.add_parser(name, help=help_); x.set_defaults(fn=fn); return x
     x = add("new", cmd_new, "新建工程（建目录 + D剪 项目 + 设画布 + 可选导入素材）"); x.add_argument("name"); x.add_argument("-b", "--brand", required=True, help="品硕/晖华（ps/hh）"); x.add_argument("--platform", default="dy", help="平台短码：dy/sph/ks/xhs/tk/yt/li（也认 douyin/tiktok…），默认 dy 竖屏"); x.add_argument("--import", dest="import_from", help="建完直接把这个文件/目录导入 D剪（>512MB 自动切段）")
+    x = add("lint", cmd_lint, "文案合规检查：绝对化/联系方式/报价/禁用词（也可 -p 查整个工程时间线）"); x.add_argument("files", nargs="*"); x.add_argument("-t", "--text"); x.add_argument("-p", "--project")
     add("health", cmd_health, "检查 GPU / ollama / D剪 / Multiplane / crv / 规则")
-    x = add("dj", cmd_dj, "D剪：check 确认单 / new 建项目 / import 导入素材 / bind 绑定当前会话 / prune 清空项目"); x.add_argument("action", choices=["check", "new", "import", "bind", "prune"]); x.add_argument("project", nargs="?"); x.add_argument("files", nargs="*"); x.add_argument("--session", help="会话 id，默认取 DSH_SESSION_ID"); x.add_argument("--yes", action="store_true"); x.add_argument("--platform", default="dy")
+    x = add("dj", cmd_dj, "D剪：check 确认单 / new 建项目 / import 导入素材 / bind 绑定当前会话 / prune 清空项目"); x.add_argument("action", choices=["check", "new", "import", "bind", "prune", "up", "down", "status"]); x.add_argument("project", nargs="?"); x.add_argument("files", nargs="*"); x.add_argument("--session", help="会话 id，默认取 DSH_SESSION_ID"); x.add_argument("--yes", action="store_true"); x.add_argument("--platform", default="dy")
     x = add("watch", cmd_watch, "拆片看图（crv 抽帧+九宫格，转录走 mf asr）"); x.add_argument("src"); x.add_argument("-p", "--project"); x.add_argument("-o", "--out"); x.add_argument("--from", dest="from_sec", type=float); x.add_argument("--to", dest="to_sec", type=float); x.add_argument("--adaptive", action="store_true"); x.add_argument("--transcribe", action="store_true", help="也转录（Mac CPU，很慢，一般不要）")
-    x = add("shot", cmd_shot, "Multiplane 出片头/参数卡/结尾几秒画面（竖屏）"); x.add_argument("shot"); x.add_argument("--root"); x.add_argument("--quality", default="high"); x.add_argument("--motion-blur", action="store_true"); x.add_argument("--scale", type=float); x.add_argument("--fps", type=int); x.add_argument("-p", "--project"); x.add_argument("-o", "--output")
+    x = add("shot", cmd_shot, "Multiplane 出片头/参数卡/结尾几秒画面（竖屏）；--template title|params|endcard 直接用模板"); x.add_argument("shot", nargs="?"); x.add_argument("-t", "--template", choices=["title", "params", "endcard"], help="用 shots/ 里的模板"); x.add_argument("--set", dest="sets", action="append", metavar="K=V", help="模板变量，如 --set TITLE=视觉检测机"); x.add_argument("--root"); x.add_argument("--quality", default="high"); x.add_argument("--motion-blur", action="store_true"); x.add_argument("--scale", type=float); x.add_argument("--fps", type=int); x.add_argument("-p", "--project"); x.add_argument("-o", "--output")
     x = add("cover", cmd_cover, "封面静帧（小红书 3:4 1080×1440）"); x.add_argument("shot"); x.add_argument("--root"); x.add_argument("--at", type=float, default=0); x.add_argument("--platform", default="xhs"); x.add_argument("--quality", default="high"); x.add_argument("--motion-blur", action="store_true"); x.add_argument("--scale", type=float); x.add_argument("--fps", type=int); x.add_argument("-o", "--output")
     x = add("asr", cmd_asr, "GPU 语音识别 → 识别/<名>.srt/.json"); x.add_argument("input"); x.add_argument("-p", "--project"); x.add_argument("--lang"); x.add_argument("--model"); x.add_argument("--prompt")
     x = add("sep", cmd_sep, "GPU 人声/伴奏分离 → 识别/<名>_人声.wav _伴奏.wav"); x.add_argument("input"); x.add_argument("-p", "--project")
@@ -703,7 +845,7 @@ def main():
     x = add("scenes", cmd_scenes, "镜头切分点检测"); x.add_argument("input"); x.add_argument("--threshold", type=float, default=27); x.add_argument("-p", "--project"); x.add_argument("-o", "--output")
     x = add("cut-silence", cmd_cut_silence, "去掉静音段（口播粗剪）"); x.add_argument("input"); x.add_argument("--noise", type=int, default=-35); x.add_argument("--min", type=float, default=0.6); x.add_argument("--pad", type=float, default=0.12); x.add_argument("-o", "--output")
     x = add("mix", cmd_mix, "配音 + 背景音混合替换音轨"); x.add_argument("video"); x.add_argument("voice"); x.add_argument("--bgm"); x.add_argument("--voice-gain", type=float, default=0); x.add_argument("--bgm-gain", type=float, default=-4); x.add_argument("-o", "--output")
-    x = add("export", cmd_export, "导出到 成品/<品牌>/<工程>/<平台>/（-14 LUFS、封面、文案模板、QC）"); x.add_argument("input"); x.add_argument("-p", "--project"); x.add_argument("-b", "--brand"); x.add_argument("--platform", default="dy", help="dy/sph/ks/xhs/tk/yt/li（也认 douyin/tiktok…）"); x.add_argument("--version", type=int); x.add_argument("--fps"); x.add_argument("--bitrate"); x.add_argument("--quality", choices=["draft", "standard", "high"], default="standard", help="bitrate 档位 4M/10M/16M"); x.add_argument("--scale", type=float, default=1, help="尺寸缩放，0.5=半幅"); x.add_argument("--code", help="内容编号 PS/HH-平台-日期-序号，写进去就按它命名"); x.add_argument("--cover-at", default="1")
+    x = add("export", cmd_export, "导出到 成品/<品牌>/<工程>/<平台>/（-14 LUFS、封面、文案模板、QC）"); x.add_argument("input"); x.add_argument("-p", "--project"); x.add_argument("-b", "--brand"); x.add_argument("--platform", default="dy", help="dy/sph/ks/xhs/tk/yt/li（也认 douyin/tiktok…）"); x.add_argument("--version", type=int); x.add_argument("--fps"); x.add_argument("--bitrate"); x.add_argument("--quality", choices=["draft", "standard", "high"], default="standard", help="bitrate 档位 4M/10M/16M"); x.add_argument("--scale", type=float, default=1, help="尺寸缩放，0.5=半幅"); x.add_argument("--code", help="内容编号 PS/HH-平台-日期-序号，写进去就按它命名"); x.add_argument("--cover-at", default="1"); x.add_argument("--force", action="store_true", help="带着合规违规也导出（不推荐）")
     x = add("pack", cmd_pack, "【弃用】旧 Remotion 包装模板（改用 mf shot；片头/参数卡走剪辑规范 §7）"); x.add_argument("input"); x.add_argument("--title", default=""); x.add_argument("--subtitle", default=""); x.add_argument("--cta", default="发样品照片/图纸，免费评估方案"); x.add_argument("--accent", default="#FF3B5C"); x.add_argument("-o", "--output")
     x = add("qc", cmd_qc, "审片检查：分辨率/时长/响度/峰值"); x.add_argument("input")
     x = add("dub", cmd_dub, "一键多语种翻配：识别→翻译→配音→伴奏→混音→字幕→导出"); x.add_argument("input"); x.add_argument("--to", required=True); x.add_argument("-p", "--project"); x.add_argument("--src-lang"); x.add_argument("--voice"); x.add_argument("--platform", default="tk", help="dy/sph/ks/xhs/tk/yt/li（也认 douyin/tiktok…）"); x.add_argument("--no-bgm", action="store_true"); x.add_argument("--no-subs", action="store_true"); x.add_argument("--force", action="store_true")

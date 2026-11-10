@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh"><meta charset="utf-8"><title>endcard</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>
+  :root{--ink:#fff;--accent:#FF3B5C}
+  #stage{width:1080px;height:1920px;background:
+     radial-gradient(90% 60% at 50% 100%, #16334a 0%, #0b1219 55%, #06090c 100%);color:var(--ink);
+     font-family:"PingFang SC","Noto Sans CJK SC",sans-serif;overflow:hidden}
+  .wrap{position:absolute;left:96px;right:96px;top:700px;text-align:left}
+  .kicker{font-size:38px;letter-spacing:.24em;font-weight:700;color:var(--accent);margin-bottom:38px}
+  .cta{font-size:96px;font-weight:800;line-height:1.24;text-shadow:0 0 2px #000,0 4px 14px rgba(0,0,0,.8);margin:0}
+  .cta i{font-style:normal;color:var(--accent)}
+  .cta .line{display:block}
+  .note{font-size:40px;line-height:1.7;color:rgba(255,255,255,.68);margin:52px 0 0;letter-spacing:.01em;max-width:820px}
+  .bar{position:absolute;left:96px;bottom:210px;display:flex;gap:18px;align-items:center}
+  .dot{width:14px;height:14px;border-radius:50%;background:var(--accent)}
+  .brand{font-size:38px;letter-spacing:.3em;color:rgba(255,255,255,.62)}
+</style>
+<div id="stage">
+  <div class="wrap">
+    <div class="kicker">{{KICKER}}</div>
+    <h2 class="cta">{{CTA}}</h2>
+    <p class="note">{{NOTE}}</p>
+  </div>
+  <div class="bar"><span class="dot"></span><span class="brand">{{BRAND}}</span></div>
+</div>
+<script src="/multiplane/runtime/shot.js"></script>
+<script>
+const kicker = document.querySelector('.kicker'), cta = document.querySelector('.cta');
+const note = document.querySelector('.note'), bar = document.querySelector('.bar');
+Shot.define({ duration: 4, fps: 30,
+  render(t){
+    const e = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+    kicker.style.opacity = String(e(t / 0.5));
+    // 打字机：CTA 逐字出现
+    const chars = cta.querySelectorAll('i, span, .ch');
+    const total = chars.length || 1;
+    const shown = Math.min(total, Math.floor(e((t - 0.25) / 1.5) * total + 0.0001));
+    chars.forEach((c, i) => { c.style.opacity = i < shown ? '1' : '0'; });
+    const n = e((t - 1.7) / 0.6);
+    note.style.opacity = String(n); note.style.transform = `translateY(${(1-n)*22}px)`;
+    const b = e((t - 2.1) / 0.7);
+    bar.style.opacity = String(b); bar.style.transform = `translateY(${(1-b)*16}px)`;
+  }});
+</script></html>

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh"><meta charset="utf-8"><title>params</title>
+<link rel="stylesheet" href="/multiplane/runtime/shot.css">
+<style>
+  :root{--ink:#fff;--accent:#FF3B5C;--dim:rgba(255,255,255,.66)}
+  #stage{width:1080px;height:1920px;background:
+     linear-gradient(160deg,#10161d 0%,#0a0e13 60%,#070a0d 100%);color:var(--ink);
+     font-family:"PingFang SC","Noto Sans CJK SC",sans-serif;overflow:hidden}
+  .head{position:absolute;left:96px;right:96px;top:250px}
+  .label{font-size:38px;letter-spacing:.2em;color:var(--accent);font-weight:700}
+  .head h2{font-size:72px;font-weight:800;margin:26px 0 0;line-height:1.22;text-shadow:0 2px 8px rgba(0,0,0,.8)}
+  .rows{position:absolute;left:96px;right:96px;top:640px}
+  .row{display:flex;align-items:flex-end;justify-content:space-between;padding:44px 0;border-bottom:2px solid rgba(255,255,255,.12)}
+  .k{font-size:46px;color:var(--dim);letter-spacing:.04em}
+  .v{font-size:80px;font-weight:800;font-variant-numeric:tabular-nums;text-shadow:0 0 2px #000}
+  .v small{font-size:40px;font-weight:600;color:var(--dim);margin-left:8px}
+  .foot{position:absolute;left:96px;right:96px;bottom:200px;font-size:38px;color:rgba(255,255,255,.5);letter-spacing:.06em}
+</style>
+<div id="stage">
+  <div class="head">
+    <div class="label">{{KICKER}}</div>
+    <h2>{{TITLE}}</h2>
+  </div>
+  <div class="rows">
+    <div class="row"><span class="k">{{K1}}</span><span class="v"><span data-n="{{V1}}">0</span><small>{{U1}}</small></span></div>
+    <div class="row"><span class="k">{{K2}}</span><span class="v"><span data-n="{{V2}}">0</span><small>{{U2}}</small></span></div>
+    <div class="row"><span class="k">{{K3}}</span><span class="v"><span data-n="{{V3}}">0</span><small>{{U3}}</small></span></div>
+  </div>
+  <div class="foot">{{FOOT}}</div>
+</div>
+<script src="/multiplane/runtime/shot.js"></script>
+<script>
+const heads = document.querySelector('.head'), label = document.querySelector('.label');
+const rows = [...document.querySelectorAll('.row')], nums = [...document.querySelectorAll('[data-n]')], foot = document.querySelector('.foot');
+const raw = nums.map(n => n.dataset.n || '0');
+const target = raw.map(v => parseFloat(v) || 0);
+const dec = raw.map(v => (v.split('.')[1] || '').length);
+Shot.define({ duration: 4, fps: 30,
+  render(t){
+    const e = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
+    label.style.opacity = String(e(t / 0.5));
+    heads.style.transform = `translateY(${(1-e((t-0.1)/0.6))*28}px)`;
+    rows.forEach((r, i) => {
+      const p = e((t - (0.35 + i * 0.28)) / 0.55);
+      r.style.opacity = String(p); r.style.transform = `translateY(${(1-p)*26}px)`;
+      const n = nums[i], v = target[i] * p;
+      n.textContent = dec[i] ? v.toFixed(dec[i]) : Math.round(v).toLocaleString('en-US');
+    });
+    foot.style.opacity = String(e((t - 1.6) / 0.7) * 0.95);
+  }});
+</script></html>
