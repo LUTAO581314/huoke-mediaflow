@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.mp4
+*.mov
+*.wav
+crv-out/
