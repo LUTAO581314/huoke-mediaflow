@@ -28,19 +28,39 @@ jobs:
   engine:
     name: 引擎补丁集成测试（对上游真代码）
     runs-on: ubuntu-latest
+    env:
+      UPSTREAM: https://github.com/Loliyer520/DSHL-DeepPack-Jian.git
+      ENGINE_REF: e1b6130   # 本机实际在跑的版本（2.1.3）；升级时改这里
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: 拉上游 D剪
-        run: git clone --depth 1 https://github.com/Loliyer520/DSHL-DeepPack-Jian.git /tmp/djian
-      - name: 打上我们的补丁（同名空项目复用 / 显式绑定 / 会话缓存）
-        run: git -C /tmp/djian apply --verbose "${GITHUB_WORKSPACE}/engine/patches/djian-session-binding.patch"
+      - name: 拉上游 D剪（钉在 ENGINE_REF）
+        run: |
+          git clone "$UPSTREAM" /tmp/djian
+          git -C /tmp/djian checkout -q "$ENGINE_REF"
+      - name: 打上两个补丁（会话绑定 + 桌面壳适配）
+        run: |
+          set -x
+          git -C /tmp/djian apply --verbose "${GITHUB_WORKSPACE}/engine/patches/djian-session-binding.patch"
+          git -C /tmp/djian apply --verbose "${GITHUB_WORKSPACE}/engine/patches/djian-desktop-shell.patch"
       - name: 会话绑定集成测试
         env:
           DJIAN_SRC: /tmp/djian
         run: node --import ./tests/engine/loader.mjs --test tests/engine/store.test.mjs
+      - name: 上游漂移探测（不拦截，只提示）
+        continue-on-error: true
+        run: |
+          git clone -q "$UPSTREAM" /tmp/head && cd /tmp/head
+          echo "上游 HEAD: $(git log --oneline -1)"
+          for p in djian-session-binding djian-desktop-shell; do
+            if git apply --check "${GITHUB_WORKSPACE}/engine/patches/$p.patch"; then
+              echo "✅ $p 在 HEAD 仍可应用"
+            else
+              echo "⚠️ $p 在 HEAD 失配，升级 D剪 前需重新适配"
+            fi
+          done
 
   audio:
     name: 端到端（真 ffmpeg：响度归一 + QC 读数）

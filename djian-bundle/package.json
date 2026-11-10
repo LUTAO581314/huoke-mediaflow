@@ -1,0 +1,21 @@
+{
+  "name": "@djian/dsh-bundle",
+  "version": "0.2.0",
+  "private": true,
+  "description": "D剪 → DSH NEXT 适配 bundle（只含 cordis 补丁）",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}
