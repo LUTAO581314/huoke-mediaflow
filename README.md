@@ -1,6 +1,8 @@
 # huoke-mediaflow
 
-品硕 / 晖华获客视频的**剪辑流水线命令行**（`mf`）。素材在 Mac，重活（识别、配音、抠图）经 SSH 交给 Windows `l-l` 的 4080 跑。
+品硕 / 晖华获客的**内容生产 + AI 剪辑**仓库：`mf` 命令行、剪辑规则、模板、引擎补丁、Windows 端脚本。
+
+素材在 Mac，重活（识别、配音、抠图）经 SSH 交给 Windows `l-l` 的 4080 跑。
 
 - 时间线剪辑、字幕、原生元素在 **D剪** 面板里做（`djian_*` 工具）；
 - `mf` 负责预处理、质检、导出、片头片卡、拆片看图；
@@ -63,6 +65,29 @@ CI（`.github/workflows/ci.yml`）三个 job：
 
 引擎补丁测试用 `tests/engine/stubs/` 顶替 `engine/dist/*`（CI 不装 remotion，也能测我们改的那段逻辑）。
 
+## 内容生产（`content/`）
+
+选题与文案不走代码，走模板 + 知识库：
+
+```
+content/brands/pinsontec/     品硕素材清单与口径（图片/视频/参数只放清单，不放原始大文件）
+content/brands/smarthuihua/   晖华同上
+content/calendar/             选题日历（一条选题一行：品牌/平台/角度/状态/编号）
+content/scripts/              脚本与分镜模板
+content/knowledge/            指向 ~/获客平台/知识库/ 的索引，不复制正文
+```
+
+素材本体和成片不进 git（在 `~/媒体库`，3.4G）；这里只存清单、日历、脚本。
+
+## 引擎补丁（`engine/patches/`）
+
+| 补丁 | 改什么 | 为什么 |
+|---|---|---|
+| `djian-session-binding.patch` | `store.mjs` / `routes.mjs` / `engine-client.js` | 同名空项目复用、显式 `bindSessionTo`、会话缓存 —— 治「每个新会话多一个空 D剪 项目」 |
+| `djian-desktop-shell.patch` | `http.mjs` / `client-timeline` | 桌面端渲染页是 `dsh-app://`（非 http），放开 origin 白名单并把引擎指回本机回环 |
+
+两个补丁都钉在 `ENGINE_REF=e1b6130`（D剪 2.1.3）。CI 的 `engine` job 按这个 ref 拉上游、打两个补丁、跑真 `store.mjs`；另有一个**不拦截**的漂移探测：上游 HEAD 上失配会打印 ⚠️，升级 D剪 前先看它。
+
 ## 目录约定
 
 ```
@@ -70,3 +95,9 @@ CI（`.github/workflows/ci.yml`）三个 job：
 ~/媒体库/成品/<品牌>/<工程>/<平台>/                  # 成片与封面
 ~/获客平台/知识库/剪辑规范.md                        # 唯一规则源
 ```
+
+## 其他文件
+
+- `djian-bundle/` — D剪 预设（`cordis.patch.yml`，含「获客项目先读剪辑规范」的人设）与插件入口；
+- `windows/` — GPU 端：`worker.py`（识别/分离/合成）与两个安装脚本；
+- `docs/djian-adapter.md` — D剪 与 `mf` 怎么接的；`docs/剪辑规范.md` — 规则副本（CI 用）。

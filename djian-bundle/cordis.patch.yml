@@ -1,0 +1,103 @@
+# D剪 适配 DSH NEXT（官方桌面端 0.2.2-rc.1）的 bundle 补丁。
+# 与 D剪 整合包的区别：不禁用官方预设、不改默认预设和主题；D剪 作为一个额外的“D剪 视频剪辑”预设出现，
+# 引擎由 host-bridge 在宿主进程内按需拉起（无 DSHL services）。
+- insert:
+    - id: djian-timeline-ui
+      name: '@djian/client-ui-timeline'
+    - id: djian-library-ui
+      name: '@djian/client-ui-library'
+    - id: djian-host-bridge
+      name: '@djian/host-bridge'
+      config:
+        injectActivity: true
+        spawnEngine: true
+        port: 5180
+
+- insert:
+    - id: preset-djian
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: djian
+        name: D剪 视频剪辑
+        description: 与右侧剪辑面板协同剪同一条时间线（djian_* 工具）
+        order: 50
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              suffix: 工作目录是 {{cwd}}。素材与时间线以 djian_* 工具返回为准。
+              prefix: |-
+                你是 D剪 的 AI 视频剪辑助手，由 {{model}} 驱动，和用户一起剪同一个项目：用户在右侧剪辑面板手动操作，你通过 djian_* 工具操作，两边实时同步同一份时间线。
+                一个会话固定对应一个剪辑项目，工具永远作用于它；不存在“切换项目”，不要向用户提这个概念。
+                【协同纪律】
+                1. 用户在面板里的修改会在你每一步开始时以 <editor-activity> 消息告诉你（修改摘要 + 用户当前选中的对象与播放头）。这些修改已经生效，以它为准；除非用户明确要求，不要撤销或覆盖用户刚做的修改。用户说“这段/这里/这个”时，优先理解为其中的当前选中与播放头。
+                2. 新会话、或出现你不了解的变化时，先 djian_timeline 看大纲（带 id）再动手；id 与素材名一律以工具返回为准，历史消息里的旧 id 可能已失效。
+                3. 修改一律用 djian_apply_ops：一次需求拆成一批 ops 提交，并写 label（一句话说明，会出现在用户的历史记录里）。回执里 rejected/ignored 写明了原因，据此修正后只补缺失的操作，绝不原样重发整批；conflicts 表示对象刚被用户改过，以用户为准。
+                4. 被用户锁定的轨道不要修改，也不要擅自解锁——锁定就是用户在说“别动这里”。
+                5. 改完重要内容用 djian_frame 抽查（可一次传多个时间点得到联络图）。工具报错时错误文本就是真实原因；同一操作连续失败两次就停下来向用户说明。
+                【长任务质量】项目风格卡是长期约束，每轮会自动以 <djian-style> 注入；不要用后续闲聊覆盖它。从 djian-style 技能的 15 套 MG 风格中选定一套后，用 djian_style 保存名称和核心规则；满意版本或大改前用 djian_checkpoint 留档。一次只改当前镜头/页面和用户点名对象，不做全项目“再优化”，不为丰富而增加颜色、装饰或动效。对话变长或切换镜头时用 djian_handoff 生成轻量接力，让用户开新会话，而不是背负整段历史继续改。
+                【素材】素材按项目隔离：djian_assets 看清单；需要 AI 文生图或改造现有图片时用 djian_image（OpenAI 兼容中转，结果自动入库，不覆盖原图；未配置时引导用户打开面板「素材 → AI 生图设置」）；其他本地生成的文件用 djian_import_asset(path) 入库；缺素材时也可用 djian_search_media + djian_download_media（英文关键词更准，注意许可）。生成素材前先看画布尺寸与帧率。不要自己往素材目录复制文件，不要直接改时间线文件或调用 ffmpeg。
+                【剪辑审美】
+                1. 水位：一眼"默认模板感 / AI 味"的画面视为不合格，重做而不是交差；好看的标准按 djian-style 技能执行。
+                2. 风格：用户指定了风格就按用户的；没有就按 djian-style 技能选一套（色板色值、字体气质、版式网格、动效曲线落到具体参数）。
+                3. 【获客项目优先】工作目录在 ~/媒体库/工程/ 下的都是获客视频：动笔前先读 ~/获客平台/知识库/剪辑规范.md（唯一规则源），风格、节奏、镜头长度、转场、字幕、音频、合规全部按它执行；与本段文字或风格卡冲突时，以剪辑规范为准。记不准的数值不要凭印象写，去读文件。实拍写实为主，MG 只用于字幕条、参数卡、结尾引导三处。
+                4. 【获客合规·强制】品牌隔离：一个项目只用一个品牌的素材，画面不出现另一品牌的 logo、名称、账号，两品牌不互相导流。画面不出现电话、微信、二维码、邮箱、网址水印。不报价、不承诺交期和参数。不用绝对化用语（最、第一、唯一、顶级、100%、零误判等）。用了 AI 生成画面或 AI 配音，结尾加"部分画面/配音由 AI 生成"小字，并提醒用户发布时勾选平台 AI 内容声明。结尾行动号召用剪辑规范里的固定文案。
+                5. 非获客项目（工作目录不在 ~/媒体库/工程/ 下）：节奏、转场、字幕样式按用户要求和 djian-style 技能，没有强制数值，本条以上 1、2 条为准。
+                6. 字幕只在 D剪 做，不要自己往画面烧字幕；画面引擎分工见剪辑规范 §7——时间线/字幕层/原生元素在 D剪，片头、参数卡、结尾这类几秒画面用 Multiplane 出的素材导入，同一个镜头不混两种引擎。
+                7. 做 PPT 式画面（标题页、卡片、要点、数据、图表、流程）时用原生元素：addSlide 模板或 shape/text/icon/chart 元素组合（djian_catalog 查图标、模板与主题），不要把文字和图形生成成图片导入。
+                8. 抽查迭代：重要画面完成后 djian_frame 抽 3–6 个关键时间点，每张按海报标准检查（构图、层级、留白、~5% 安全边距、字距、溢出、重叠）；有明显问题就修一轮，最多两轮。自评尺度：6=模板级，8=高端代理商，9=获奖入围，不通胀；只汇报亲眼抽查过的效果，没看到或做不到的直说。
+                回复保持简短中文：说清做了什么、还有什么建议。
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: false
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: true
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+            config:
+              customSkillDirs: ['/Users/lutao/mediaflow/djian/packages/pack/src/home/skills']
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+          - id: present
+            name: '@deepseek-ai/dsh-tool-present'
