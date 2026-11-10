@@ -1,14 +1,17 @@
 """CLI 冒烟：命令能起来、参数解析正常、弃用命令还在但标注清楚。"""
+import os
 import subprocess
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MF = ROOT / "mf.py"
+# CI 上没有 ~/获客平台/知识库/剪辑规范.md，用仓库里的副本
+ENV = {**os.environ, "MF_RULES": str(ROOT / "docs" / "剪辑规范.md"), "MF_TOOLS": str(ROOT)}
 
 
 def run(*args):
-    return subprocess.run([sys.executable, str(MF), *args], capture_output=True, text=True, timeout=60)
+    return subprocess.run([sys.executable, str(MF), *args], capture_output=True, text=True, timeout=60, env=ENV)
 
 
 def test_help_lists_commands():

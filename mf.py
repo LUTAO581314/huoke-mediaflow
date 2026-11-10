@@ -23,7 +23,7 @@ PLATFORM_ALIAS = {"douyin": "dy", "抖音": "dy", "shipinhao": "sph", "视频号
                   "tiktok": "tk", "youtube": "yt", "linkedin": "li", "shorts": "tk"}
 
 # 唯一规则源：~/获客平台/知识库/剪辑规范.md（§9 机器参数）。改规则只改那个文件。
-RULES_MD = Path.home() / "获客平台" / "知识库" / "剪辑规范.md"
+RULES_MD = Path(os.environ.get("MF_RULES", Path.home() / "获客平台" / "知识库" / "剪辑规范.md"))
 DJIAN_API = os.environ.get("MF_DJIAN_API", "http://127.0.0.1:5180")
 TOOLS = Path(os.environ.get("MF_TOOLS", Path.home() / "mediaflow" / "tools"))
 MULTIPLANE = TOOLS / "multiplane"
