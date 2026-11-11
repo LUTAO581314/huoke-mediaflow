@@ -11,7 +11,9 @@ bash scripts/check-env.sh --json
 
 - 返回 `{"ok":..,"fail":..,"issues":[..],"next":[..]}`；
 - **按 `next` 数组的顺序一项一项补**，`issues` 为空就说明环境齐了、可以干活；
-- 不允许跳过体检直接 `npm install` / `brew install` / `pip install`。
+- 不允许跳过体检直接 `npm install` / `brew install` / `pip install`；
+- 缺的是 Mac 侧工具（ffmpeg/node/引擎/multiplane/crv）时，可以跑 `bash scripts/bootstrap.sh --yes` 补；
+  这个脚本**只装 Mac 工具，不装任何模型**。
 
 ## 第 1 条：不要在 Mac 上装这些
 

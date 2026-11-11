@@ -135,7 +135,8 @@ content/knowledge/            指向 ~/获客平台/知识库/ 的索引，不�
 - `AGENTS.md` — 给 AI 助手的铁律（先体检、禁止本机装 GPU 模型、改动流程）；
 - `docs/安装与复现.md` — **从零安装到出第一条片**（含 DSH 接入、常见错误排查）；
 - `docs/架构与引擎.md` — 三层架构、每个引擎的版本/端口/产物/可替换性、已知边界；
-- `scripts/check-env.sh` — 环境体检脚本；
+- `scripts/check-env.sh` — 环境体检脚本（`--json` 给 AI 解析）；
+- `scripts/bootstrap.sh` — 半自动安装（只装 Mac 工具与引擎，**不装模型**）；
 - `djian-bundle/` — D剪 预设（`cordis.patch.yml`，含「获客项目先读剪辑规范」的人设）与插件入口；
 - `windows/` — GPU 端：`worker.py`（识别/分离/合成）与两个安装脚本；
 - `docs/djian-adapter.md` — D剪 与 `mf` 怎么接的；`docs/剪辑规范.md` — 规则副本（CI 用）。
