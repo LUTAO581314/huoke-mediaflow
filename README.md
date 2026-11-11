@@ -4,18 +4,49 @@
 
 素材在 Mac，重活（识别、配音、抠图）经 SSH 交给 Windows `l-l` 的 4080 跑。
 
-- 时间线剪辑、字幕、原生元素在 **D剪** 面板里做（`djian_*` 工具）；
-- `mf` 负责预处理、质检、导出、片头片卡、拆片看图；
-- 两边共用同一份规则：`~/获客平台/知识库/剪辑规范.md`（本仓库 `docs/剪辑规范.md` 是副本，只用于测试与对照）。
+## 先说清楚：这套东西由三个部分组成
+
+| 组成 | 是什么 | 装在哪 |
+|---|---|---|
+| **`mf`** | 本仓库的 `mf.py`，Python **单文件**（只用标准库）：预处理、质检、导出、片卡、拆片看图 | Mac，`~/mediaflow/mf.py` |
+| **D剪 引擎** | 开源项目 `DSHL-DeepPack-Jian` + 本仓库两个补丁：时间线、字幕、原生元素、Remotion 渲染 | Mac，`~/mediaflow/djian`，端口 **5180** |
+| **DSH** | 宿主应用：右侧剪辑面板和 `djian_*` 工具由它提供 | Mac，官方桌面端 |
+
+> **只 clone 这个仓库是跑不起来的**：仓库里没有剪辑内核。必须按 [`docs/安装与复现.md`](docs/安装与复现.md) 把 D剪 上游 clone 下来、打补丁、并把 6 个 `@djian/*` 包 `link:` 进 DSH profile。
+> 想看每个引擎具体是什么、版本、能不能替换，看 [`docs/架构与引擎.md`](docs/架构与引擎.md)。
+
+## 环境要求（实测版本，别用更低的）
+
+| 依赖 | 版本 | 说明 |
+|---|---|---|
+| macOS | 13+（Apple Silicon） | 实测 26.6.2 / arm64 |
+| Node.js | **≥ 22.18**（实测 24.21.0） | D剪 引擎硬要求 |
+| Python | **≥ 3.12**（实测 3.12.16） | 系统自带 3.9 不够 |
+| ffmpeg / ffprobe | 9.0.2 | 必须在 PATH |
+| yt-dlp | 2025.10.14 | 下源片 |
+| D剪 上游 | `e1b6130`（2.1.3）+ 两个补丁 | Remotion 4.0.526 |
+| @djian/* 6 个包 | 0.2.0 | **不在 npm**，本地 link |
+| Multiplane | 0.3.13 + Chromium | 片头卡/参数卡/封面 |
+| crv | pip（venv） | 拆片看图（可选） |
+| GPU 从机 | Windows + NVIDIA，faster-whisper / demucs / ollama | 识别、配音（可选） |
+
+## 先跑环境体检
+
+```bash
+bash scripts/check-env.sh     # 缺什么、版本够不够，一条命令看完；不改任何东西
+mf health                     # 装好之后再用这个（检查 GPU / D剪 / Multiplane / crv / 规则）
+```
+
+`check-env.sh` 会逐个验证：二进制与版本、三个目录、规则文件与 §9 参数块、`mf` 是否在 PATH、**引擎是否在线**、上游源码是否存在、`session-binding` 补丁是否已打、DSH 的 6 个 link 是否齐全、Multiplane/Playwright/crv、SSH 从机。全绿再动手。
 
 ## 常用命令
 
 ```bash
-mf health                                   # 环境体检（GPU / D剪 / Multiplane / crv / 规则）
+mf health                                   # 环境体检（GPU / ollama / D剪 / Multiplane / crv / 规则）
 mf new 视觉检测-三班倒 -b 品硕 --platform dy  # 建工程 + D剪 项目 + 把当前会话绑上去
 mf dj check 视觉检测-三班倒                  # 开剪前确认单
 mf dj import <工程> <文件…>                  # 追加素材（>512MB 自动切段）
-mf asr / translate / tts / sep / mix        # 预处理
+mf asr / translate / tts / sep / mix        # 预处理（走 Windows GPU）
 mf watch <链接|文件>                         # 拆片看图（crv，出九宫格）
 mf shot -t title  --set TITLE=三个质检员三班倒 --set KICKER=机器视觉检测   # 模板出片头
 mf shot -t params --set K1=检测精度 --set V1=0.05 --set U1=mm              # 参数卡（数字滚动）
@@ -94,10 +125,14 @@ content/knowledge/            指向 ~/获客平台/知识库/ 的索引，不�
 ~/媒体库/工程/<日期>-<名称>/{识别,配音,剪辑,包装}   # 一选题一个工程（mf new 建）
 ~/媒体库/成品/<品牌>/<工程>/<平台>/                  # 成片与封面
 ~/获客平台/知识库/剪辑规范.md                        # 唯一规则源
+~/.djian/projects/<pid>/                            # D剪 项目（时间线 JSON + 素材副本）
 ```
 
 ## 其他文件
 
+- `docs/安装与复现.md` — **从零安装到出第一条片**（含 DSH 接入、常见错误排查）；
+- `docs/架构与引擎.md` — 三层架构、每个引擎的版本/端口/产物/可替换性、已知边界；
+- `scripts/check-env.sh` — 环境体检脚本；
 - `djian-bundle/` — D剪 预设（`cordis.patch.yml`，含「获客项目先读剪辑规范」的人设）与插件入口；
 - `windows/` — GPU 端：`worker.py`（识别/分离/合成）与两个安装脚本；
 - `docs/djian-adapter.md` — D剪 与 `mf` 怎么接的；`docs/剪辑规范.md` — 规则副本（CI 用）。
