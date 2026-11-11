@@ -12,6 +12,8 @@
 | **D剪 引擎** | 开源项目 `DSHL-DeepPack-Jian` + 本仓库两个补丁：时间线、字幕、原生元素、Remotion 渲染 | Mac，`~/mediaflow/djian`，端口 **5180** |
 | **DSH** | 宿主应用：右侧剪辑面板和 `djian_*` 工具由它提供 | Mac，官方桌面端 |
 
+> **AI 助手先读 [`AGENTS.md`](AGENTS.md)：第一步是 `bash scripts/check-env.sh --json`，不许在本机装 ollama / whisper / TTS 模型。**
+>
 > **只 clone 这个仓库是跑不起来的**：仓库里没有剪辑内核。必须按 [`docs/安装与复现.md`](docs/安装与复现.md) 把 D剪 上游 clone 下来、打补丁、并把 6 个 `@djian/*` 包 `link:` 进 DSH profile。
 > 想看每个引擎具体是什么、版本、能不能替换，看 [`docs/架构与引擎.md`](docs/架构与引擎.md)。
 
@@ -130,6 +132,7 @@ content/knowledge/            指向 ~/获客平台/知识库/ 的索引，不�
 
 ## 其他文件
 
+- `AGENTS.md` — 给 AI 助手的铁律（先体检、禁止本机装 GPU 模型、改动流程）；
 - `docs/安装与复现.md` — **从零安装到出第一条片**（含 DSH 接入、常见错误排查）；
 - `docs/架构与引擎.md` — 三层架构、每个引擎的版本/端口/产物/可替换性、已知边界；
 - `scripts/check-env.sh` — 环境体检脚本；
