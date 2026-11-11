@@ -204,6 +204,8 @@ def auto_bind(proj, pid):
 def cmd_dj(a):
     if a.action in ("up", "down", "status"): return cmd_serve(a)
     proj = project_dir(a.project) if a.project else None
+    if proj is None and a.action in ("new", "import", "bind", "check"):
+        proj = project_dir(None)      # 没给工程名时按 cwd 推断；推不出来 die 给中文提示
     if a.action == "new":
         st = dj_state(proj)
         if st:
@@ -267,7 +269,7 @@ def cmd_dj(a):
     print(f"源片目录 {src}（{'有' if src.exists() else '缺'}）")
     if not assets: print("! 素材库是空的：先 mf dj import 或 mf new --import <目录>")
     print(f"字幕：{rules()['subtitles']['engine']} 内做，不用 mf burn")
-    vs = lint_timeline(tl, r)
+    vs = lint_timeline(tl, rules())
     if vs:
         print(f"\n✗ 合规检查不通过 {len(vs)} 处（剪辑规范 §4）：")
         print(format_violations(vs))

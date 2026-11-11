@@ -39,6 +39,8 @@ FIXTURE_RULES = {
     "audio": {"music": [0.2, 0.3], "lufs": -14, "tolerance": 1.5, "true_peak_max": -1.5},
     "naming": {"code_pattern": "^(PS|HH)-[A-Z]+-\\d{8}-\\d{2}$"},
     "banned_regex": ["最", "第一", "唯一", "100%", "零误判", "电话", "微信", "二维码"],
+    # print_rules() 会读 cta，缺了会在 dj check 里 KeyError（test_dj_check 覆盖）
+    "cta": {"cn": "发样品照片/图纸，免费评估方案", "en": "Send us your part photos or drawings for a free evaluation."},
 }
 
 
