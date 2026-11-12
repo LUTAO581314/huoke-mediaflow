@@ -44,21 +44,24 @@ jobs:
         run: |
           git clone "$UPSTREAM" /tmp/djian
           git -C /tmp/djian checkout -q "$ENGINE_REF"
-      - name: 打上两个补丁（会话绑定 + 桌面壳适配）
+      - name: 打上两个补丁（桌面壳适配 → 会话绑定/host-bridge 缓存）
         run: |
           set -x
-          git -C /tmp/djian apply --verbose "${GITHUB_WORKSPACE}/engine/patches/djian-session-binding.patch"
+          # 顺序有依赖：桌面壳补丁先打，会话绑定补丁会改 store/routes/engine-client
           git -C /tmp/djian apply --verbose "${GITHUB_WORKSPACE}/engine/patches/djian-desktop-shell.patch"
-      - name: 会话绑定集成测试
+          git -C /tmp/djian apply --verbose "${GITHUB_WORKSPACE}/engine/patches/djian-session-binding.patch"
+      - name: 引擎侧集成测试（会话绑定 + host-bridge 缓存）
         env:
           DJIAN_SRC: /tmp/djian
-        run: node --import ./tests/engine/loader.mjs --test tests/engine/store.test.mjs
+        run: |
+          node --import ./tests/engine/loader.mjs --test tests/engine/store.test.mjs
+          node --test tests/engine/hostbridge-cache.test.mjs
       - name: 上游漂移探测（不拦截，只提示）
         continue-on-error: true
         run: |
           git clone -q "$UPSTREAM" /tmp/head && cd /tmp/head
           echo "上游 HEAD: $(git log --oneline -1)"
-          for p in djian-session-binding djian-desktop-shell; do
+          for p in djian-desktop-shell djian-session-binding; do
             if git apply --check "${GITHUB_WORKSPACE}/engine/patches/$p.patch"; then
               echo "✅ $p 在 HEAD 仍可应用"
             else
