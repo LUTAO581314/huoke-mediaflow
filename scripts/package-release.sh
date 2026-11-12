@@ -20,7 +20,8 @@ bad=$(tar -tzf "$OUT/$NAME.tar.gz" | grep -E "(^|/)(node_modules|\.env|.*\.pem|.
 if [ -n "$bad" ]; then echo "✗ 包里出现不该有的东西："; echo "$bad"; exit 1; fi
 echo "✓ 无 node_modules / .env / 密钥 / 模型 / venv"
 
-sha256sum "$OUT/$NAME.tar.gz" > "$OUT/SHA256SUMS" 2>/dev/null || shasum -a 256 "$OUT/$NAME.tar.gz" > "$OUT/SHA256SUMS"
+# 校验和里只写文件名（相对路径），别人下载后能直接 `sha256sum -c SHA256SUMS`
+( cd "$OUT" && (sha256sum "$NAME.tar.gz" 2>/dev/null || shasum -a 256 "$NAME.tar.gz") > SHA256SUMS )
 echo "== 产物 =="
 ls -lh "$OUT/$NAME.tar.gz" | awk '{print "  "$5"  "$9}'
 cat "$OUT/SHA256SUMS" | sed 's/^/  /'
