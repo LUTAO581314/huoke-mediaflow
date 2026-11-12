@@ -7,7 +7,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from huoke_lint import format_violations, lint_text, lint_timeline  # noqa: E402
 
-LIB = Path.home() / "媒体库"
+LIB = Path(os.environ.get("MF_LIB", Path.home() / "媒体库"))  # 素材库根，可用 MF_LIB 指到别的盘
 FONTS = LIB / "素材" / "字体"
 GPU_HOST = os.environ.get("MF_GPU_HOST", "lt@l-l")
 GPU_PY = r"C:\mediagpu\venv\Scripts\python.exe"
@@ -317,11 +317,17 @@ def cmd_serve(a):
     if a.action == "down":
         pid = info.get("pid")
         if not pid: print("没有记录 pid（~/.djian/engine-port.json）；可能本来就没起"); return
-        try:
-            ps = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout
-        except Exception: ps = ""
-        if "webui/server/index.mjs" not in ps:
-            print(f"pid {pid} 已经不是 D剪 引擎（{ps.strip()[:60]}），不动它"); return
+        if os.name == "nt":
+            tl = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True).stdout
+            if str(pid) not in tl:
+                print(f"pid {pid} 已经不在（可能本来就没起）"); return
+        else:
+            try:
+                ps = subprocess.run(["ps", "-p", str(pid), "-o", "command="], capture_output=True, text=True).stdout
+            except Exception:
+                ps = ""
+            if "webui/server/index.mjs" not in ps:
+                print(f"pid {pid} 已经不是 D剪 引擎（{ps.strip()[:60]}），不动它"); return
         os.kill(int(pid), 15)
         for _ in range(40):
             time.sleep(0.25)
@@ -333,8 +339,13 @@ def cmd_serve(a):
     logf = logdir / "engine.log"
     log(f"启动引擎 {entry}")
     with logf.open("ab") as fh:
-        subprocess.Popen(["node", str(entry)], cwd=str(DJ_ROOT if (DJ_ROOT / "package.json").exists() else entry.parent),
-                         stdout=fh, stderr=subprocess.STDOUT, start_new_session=True)
+        kw = dict(stdout=fh, stderr=subprocess.STDOUT)
+        if os.name == "nt":
+            kw["creationflags"] = subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            kw["start_new_session"] = True
+        subprocess.Popen(["node", str(entry)],
+                         cwd=str(DJ_ROOT if (DJ_ROOT / "package.json").exists() else entry.parent), **kw)
     for _ in range(60):
         time.sleep(0.25)
         if dj_ready():

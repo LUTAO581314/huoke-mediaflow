@@ -6,7 +6,8 @@
 ## 第 0 条：先体检，再动手
 
 ```bash
-bash scripts/check-env.sh --json
+bash scripts/check-env.sh --json        # macOS / Linux
+python scripts/check-env.py --json      # Windows（同一套检查）
 ```
 
 - 返回 `{"ok":..,"fail":..,"issues":[..],"next":[..]}`；
