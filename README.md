@@ -98,6 +98,14 @@ CI（`.github/workflows/ci.yml`）三个 job：
 
 引擎补丁测试用 `tests/engine/stubs/` 顶替 `engine/dist/*`（CI 不装 remotion，也能测我们改的那段逻辑）。
 
+## 两段式内容生产（员工机 + 远程显卡）
+
+内容生产板块**只有本仓库**（huoke-content / ai-clip-toolbox 已并入并归档）。
+
+- 员工机只装：mf、D剪、`adapters/djian-dsh-next` 插件、FFmpeg。**不装 torch、不装模型。**
+- 显卡活（ASR / TTS / 视频生成）走远程显卡网关，见 [docs/远程显卡接口.md](docs/远程显卡接口.md)
+- 分工与最小安装清单见 [docs/两段式-员工机与远程显卡.md](docs/两段式-员工机与远程显卡.md)
+
 ## 内容生产（`content/`）
 
 选题与文案不走代码，走模板 + 知识库：
