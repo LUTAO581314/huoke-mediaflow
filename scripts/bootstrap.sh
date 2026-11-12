@@ -38,7 +38,7 @@ else
   mkdir -p "$(dirname "$DJ")"
   ask "clone 上游并 checkout $ENGINE_REF" \
     "git clone https://github.com/Loliyer520/DSHL-DeepPack-Jian.git '$DJ' && git -C '$DJ' checkout $ENGINE_REF"
-  for p in djian-session-binding.patch djian-desktop-shell.patch djian-hostbridge-cache.patch; do
+  for p in djian-desktop-shell.patch djian-session-binding.patch; do
     ask "打补丁 $p" "git -C '$DJ' apply '$REPO/engine/patches/$p'"
   done
 fi
