@@ -1,0 +1,22 @@
+diff --git a/packages/host-bridge/lib/engine-client.js b/packages/host-bridge/lib/engine-client.js
+index 6b1cc98..b3d71e7 100644
+--- a/packages/host-bridge/lib/engine-client.js
++++ b/packages/host-bridge/lib/engine-client.js
+@@ -88,10 +88,16 @@ export class EngineClient {
+   /** 会话 → 项目（幂等绑定，结果缓存） */
+   async projectFor(sessionId) {
+     this.projects ??= new Map();
+-    if (this.projects.has(sessionId)) return this.projects.get(sessionId);
++    this.projectsAt ??= new Map();
++    const now = Date.now();
++    const at = this.projectsAt.get(sessionId) || 0;
++    // 短缓存（2 秒）：外部改了绑定（mf dj bind / 面板切项目 / 项目被删）能很快看到。
++    // 注意：不能在这里做「命中就返回」的无限期缓存，否则绑定永远刷新不到。
++    if (this.projects.has(sessionId) && now - at < 2000) return this.projects.get(sessionId);
+     const r = await this.post('/api/session-project', { sessionId });
+     const project = r.project;
+     this.projects.set(sessionId, project);
++    this.projectsAt.set(sessionId, now);
+     return project;
+   }
+ }
