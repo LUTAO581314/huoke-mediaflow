@@ -355,14 +355,22 @@ def cmd_serve(a):
     die(f"引擎 15 秒内没响应，看日志：{logf}")
 
 def cmd_new(a):
+    kind = a.kind
     brand = norm_brand(a.brand)
     name = project_name(a.name)
     proj = LIB / "工程" / name
     for sub in ["识别", "配音", "剪辑", "包装"]: (proj / sub).mkdir(parents=True, exist_ok=True)
     (proj / ".brand").write_text(brand)
+    (proj / ".kind").write_text(kind)
+    (proj / "README.md").write_text(
+        f"# {name}\n\n"
+        f"判定：{'成片（只加字幕 + TTS 配音，保持原片风格，不重剪）' if kind == 'film' else '素材（按剪辑规范 §1–§3 成品风格剪）'}"
+        f"（剪辑规范 §0）\n品牌：{brand}\n平台：{a.platform}\n\n"
+        "剪完按 §10 复验：语音回读 / 字幕覆盖 / 单音轨 / QC / 抽帧 / 合规 / 编号一致。\n",
+        encoding="utf-8")
     out = LIB / "成品" / brand / name; out.mkdir(parents=True, exist_ok=True)
     canvas = canvas_of(a.platform)
-    print(f"{proj}\n成品 → {out}\n素材 → {LIB / '素材' / '源片' / brand}")
+    print(f"{proj}\n成品 → {out}\n素材 → {LIB / '素材' / '源片' / brand}\n判定 → {'成片：只加字幕+TTS，保持原片风格' if kind == 'film' else '素材：按成品风格剪'}（规范 §0）")
     try:
         pid = dj_create(name, canvas)
         (proj / ".djian.json").write_text(json.dumps({"id": pid, "name": name, "canvas": canvas}, ensure_ascii=False, indent=1))
@@ -411,6 +419,44 @@ def cmd_health(a):
     print("Multiplane:", "OK " + str(MULTIPLANE) if MULTIPLANE.exists() else "缺失 " + str(MULTIPLANE))
     print("crv:", "OK " + str(CRV_BIN) if CRV_BIN.exists() else "缺失 " + str(CRV_BIN))
     print("规则:", RULES_MD if RULES_MD.exists() else "缺失 " + str(RULES_MD))
+
+def cmd_verify(a):
+    """剪后复验（规范 §10）：QC 指标、音轨数、抽帧看片，可选语音回读。"""
+    vid = Path(a.input).resolve()
+    if not vid.exists(): die(f"找不到成片 {vid}")
+    rep = qc(str(vid))
+    print("技术指标:", json.dumps(rep, ensure_ascii=False))
+    ok = rep.get("ok")
+    streams = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", str(vid)],
+                                        capture_output=True, text=True).stdout or "{}").get("streams", [])
+    audible = [x for x in streams if x.get("codec_type") == "audio" and float(x.get("duration") or 0) > 0.5]
+    print(f"音轨: {len(audible)} 条", "✅" if len(audible) == 1 else "❌ 应为 1 条（多版本叠音是典型事故）")
+    proj = project_dir(a.project) if a.project else vid.parent
+    out = Path(a.out) if a.out else proj / "复验"
+    out.mkdir(parents=True, exist_ok=True)
+    dur = float(rep.get("duration") or 0)
+    n = max(4, min(12, a.frames)); step = dur / n
+    files = []
+    for i in range(n):
+        f = out / f"f{i+1:02d}.jpg"
+        ffmpeg("-ss", f"{i*step + step/2:.2f}", "-i", vid, "-frames:v", "1", "-vf", "scale=270:-1", f)
+        files.append(f)
+    sheet = out / f"{vid.stem}_复验抽帧.jpg"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-pattern_type", "glob",
+                    "-i", str(out / "f*.jpg"), "-filter_complex", f"tile={min(6, n)}x{(n + min(6, n) - 1)//min(6, n)}",
+                    "-frames:v", "1", str(sheet)], check=False)
+    print("抽帧:", sheet)
+    if a.lang:
+        wav = out / "verify.wav"
+        ffmpeg("-i", vid, "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", wav)
+        ns = argparse.Namespace(input=str(wav), project=str(proj / "识别"), lang=a.lang, model=None, prompt=None)
+        print("语音回读（ASR）…"); cmd_asr(ns)
+        srt = proj / "识别" / "verify.srt"
+        if srt.exists():
+            txt = " ".join(r["text"] for r in read_srt(srt))
+            (out / "回读.txt").write_text(txt, encoding="utf-8")
+            print("回读文本:", txt[:400])
+    print("结论:", "通过" if ok and len(audible) == 1 else "要修（看上面 ❌）")
 
 def cmd_asr(a):
     proj = project_dir(a.project); src = Path(a.input).resolve()
@@ -627,6 +673,23 @@ def lint_gate(proj, force=False):
     if not force: die("改掉上面的问题再导出；确认要强出加 --force")
     print("! --force：带着违规继续导出（发布前必须修）", file=sys.stderr)
 
+def last_json_block(text):
+    """ffmpeg 的 loudnorm 会打印 JSON；偶发前后夹带其它大括号内容，取最后一个能解析且含 input_i 的块。"""
+    end = text.rfind("}")
+    while end != -1:
+        start = text.rfind("{", 0, end)
+        if start == -1:
+            break
+        try:
+            obj = json.loads(text[start:end + 1])
+            if isinstance(obj, dict) and "input_i" in obj:
+                return obj
+        except Exception:
+            pass
+        end = text.rfind("}", 0, end)
+    return None
+
+
 def cmd_export(a):
     src = Path(a.input); proj = project_dir(a.project); a.platform = plat(a.platform)
     r = rules(); canvas = canvas_of(a.platform); W, H = canvas["width"], canvas["height"]
@@ -651,7 +714,9 @@ def cmd_export(a):
     if not re.search(r"(PS|HH)-", base): log("提醒：文件名不带内容编号（PS-/HH-平台-日期-序号），发布前补上")
     log("响度测量 …")
     m = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(src), "-af", f"loudnorm=I={lufs}:TP={tp}:LRA=11:print_format=json", "-f", "null", "-"], capture_output=True, text=True).stderr
-    j = json.loads(m[m.rfind("{"):m.rfind("}") + 1])
+    j = last_json_block(m)
+    if not j:
+        die("响度测量失败：ffmpeg 没给出 loudnorm JSON（源片可能没有音轨）")
     ln = (f"loudnorm=I={lufs}:TP={tp}:LRA=11:measured_I={j['input_i']}:measured_TP={j['input_tp']}:measured_LRA={j['input_lra']}"
           f":measured_thresh={j['input_thresh']}:offset={j['target_offset']}:linear=true,aresample=48000")
     ffmpeg("-i", src, "-vf", vf, "-af", ln, "-c:v", "h264_videotoolbox", "-b:v", bitrate, "-maxrate", str(int(bitrate[:-1]) * 2) + "M", "-profile:v", "high",
@@ -843,7 +908,8 @@ def main():
     sp = p.add_subparsers(dest="cmd", required=True)
     def add(name, fn, help_):
         x = sp.add_parser(name, help=help_); x.set_defaults(fn=fn); return x
-    x = add("new", cmd_new, "新建工程（建目录 + D剪 项目 + 设画布 + 可选导入素材）"); x.add_argument("name"); x.add_argument("-b", "--brand", required=True, help="品硕/晖华（ps/hh）"); x.add_argument("--platform", default="dy", help="平台短码：dy/sph/ks/xhs/tk/yt/li（也认 douyin/tiktok…），默认 dy 竖屏"); x.add_argument("--import", dest="import_from", help="建完直接把这个文件/目录导入 D剪（>512MB 自动切段）")
+    x = add("new", cmd_new, "新建工程（建目录 + D剪 项目 + 设画布 + 可选导入素材）"); x.add_argument("name"); x.add_argument("-b", "--brand", required=True, help="品硕/晖华（ps/hh）"); x.add_argument("--platform", default="dy", help="平台短码：dy/sph/ks/xhs/tk/yt/li（也认 douyin/tiktok…），默认 dy 竖屏"); x.add_argument("--import", dest="import_from", help="建完直接把这个文件/目录导入 D剪（>512MB 自动切段）"); x.add_argument("--kind", required=True, choices=["film", "raw"], help="剪前判定：film=成片（只加字幕+TTS，保持原片风格）/ raw=素材（按成品风格剪）——规范 §0")
+    x = add("verify", cmd_verify, "剪后复验（规范 §10）：QC/音轨数/抽帧，--lang 时做语音回读"); x.add_argument("input"); x.add_argument("-p", "--project"); x.add_argument("--lang", help='回读语言全名：Chinese/Thai/Indonesian/Vietnamese…'); x.add_argument("--frames", type=int, default=10); x.add_argument("-o", "--out")
     x = add("lint", cmd_lint, "文案合规检查：绝对化/联系方式/报价/禁用词（也可 -p 查整个工程时间线）"); x.add_argument("files", nargs="*"); x.add_argument("-t", "--text"); x.add_argument("-p", "--project")
     add("health", cmd_health, "检查 GPU / ollama / D剪 / Multiplane / crv / 规则")
     x = add("dj", cmd_dj, "D剪：check 确认单 / new 建项目 / import 导入素材 / bind 绑定当前会话 / prune 清空项目"); x.add_argument("action", choices=["check", "new", "import", "bind", "prune", "up", "down", "status"]); x.add_argument("project", nargs="?"); x.add_argument("files", nargs="*"); x.add_argument("--session", help="会话 id，默认取 DSH_SESSION_ID"); x.add_argument("--yes", action="store_true"); x.add_argument("--platform", default="dy")
