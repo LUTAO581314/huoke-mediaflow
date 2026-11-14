@@ -36,3 +36,17 @@ def test_bad_platform_fails_cleanly(tmp_path):
     r = run("export", "/tmp/none.mp4", "-p", str(proj), "--platform", "bilibili")
     assert r.returncode != 0
     assert "平台只能是" in (r.stderr + r.stdout)
+
+
+def test_verify_help():
+    """剪后复验命令存在且参数可解析（规范 §10）。"""
+    r = run("verify", "-h")
+    assert r.returncode == 0
+    assert "--lang" in r.stdout
+
+
+def test_new_requires_kind():
+    """剪前判定必填（规范 §0）：缺 --kind 时 argparse 退出码 2。"""
+    r = run("new", "x", "-b", "品硕")
+    assert r.returncode == 2
+    assert "--kind" in (r.stderr + r.stdout)

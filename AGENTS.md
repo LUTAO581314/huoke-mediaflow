@@ -53,19 +53,27 @@ check-env.sh 里这几项全绿：
 - **`engine/patches/` 钉在上游 `e1b6130`**。不要顺手把上游升到新版本——补丁会失配，CI 会红。
 - **规则只有一份**：`~/获客平台/知识库/剪辑规范.md`。不要在代码里硬编码画布/字号/响度，也不要自己另建一份规则。
 
-## 第 5 条：改动流程
+## 第 5 条：每条片先判定「成片 / 素材」，剪完必须复验
+
+- 开工第一件事：`mf new <名称> -b 品牌 --kind film|raw`（必填，写进工程 README）。
+  `film` = 成片：**不重剪、不改画面、不加特效**，只加目标语字幕 + TTS 配音，保持原片风格；
+  `raw` = 素材：按 `剪辑规范.md` §1–§3 的成品风格剪。
+- 剪完跑 `mf verify <成片> [--lang Thai|Indonesian|Vietnamese|Chinese]`：QC 指标、音轨数必须 1、
+  抽帧看片、可选语音回读（ASR 与稿子比对）。规范 §10 的六项没全过，不算交付。
+
+## 第 6 条：改动流程
 
 - 不要直接推 `main`：开分支 → PR → 等 CI 三个 job 绿 → 合并；
 - 改剪辑规则（`剪辑规范.md`）先给用户看 diff；
 - 改 `mf.py` 要让 `MF_RULES=$PWD/docs/剪辑规范.md python -m pytest -q` 通过（52 条）；
 - 动 `engine/patches/` 要同时跑 `node --import ./tests/engine/loader.mjs --test tests/engine/store.test.mjs`。
 
-## 第 6 条：报错先查表
+## 第 7 条：报错先查表
 
 `docs/安装与复现.md` 的「常见错误」有 11 条对照（`403 CLIENT_HEADER_REQUIRED`、`shot_not_found`、`找不到剪辑规范`、引擎连不上、空项目堆积、peer 冲突、Node 太旧、CPU 转录慢、ollama 超时、512MB 上限、导出被拦）。
 先对表，再决定要不要改代码。
 
-## 第 7 条：合规是硬约束，不是建议
+## 第 8 条：合规是硬约束，不是建议
 
 出片前必过 `mf dj check`（开剪前）和 `mf export`（成片前）两道闸。四条红线：品牌隔离、画面无联系方式、不报价不承诺交期、不用绝对化用语。
 闸门拦住时**改文案**，不要用 `--force` 绕过（除非用户明确要求）。
